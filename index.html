@@ -1,82 +1,557 @@
+<!DOCTYPE html>
 <html>
-  <head>
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  </head>
 
-  <body>
-    <a-scene vr-mode-ui="enabled: true">
-      
-      <!-- Camera (player) -->
-      <a-entity id="player" position="0 1.6 0" camera look-controls></a-entity>
+<head>
+  <meta charset="utf-8" />
+  <title>VR Shooter Test</title>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <style>
+    /* Mira (Crosshair) para modo desktop */
+    #crosshair {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 30px;
+      height: 30px;
+      pointer-events: none;
+      z-index: 1000;
+      display: none;
+    }
 
-      <!-- Right hand (controller) -->
-      <a-entity id="gun" laser-controls="hand: right"></a-entity>
+    #crosshair::before,
+    #crosshair::after {
+      content: '';
+      position: absolute;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+    }
 
-      <!-- Ground -->
-      <a-plane rotation="-90 0 0" width="15" height="15" color="#444"></a-plane>
+    #crosshair::before {
+      width: 2px;
+      height: 20px;
+      top: 5px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
 
-      <!-- Enemy -->
-      <a-box id="enemy"
-             position="0 1 -5"
-             depth="1" height="1" width="1"
-             color="red"></a-box>
+    #crosshair::after {
+      width: 20px;
+      height: 2px;
+      left: 5px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
 
-      <script>
-        // Atira quando apertar o gatilho
-        const gun = document.querySelector("#gun");
-        const scene = document.querySelector("a-scene");
+    /* Instruções */
+    #instructions {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 1001;
+    }
 
-        gun.addEventListener("triggerdown", () => {
-          shoot();
-        });
+    /* Display de Munição */
+    #ammo-display {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 24px;
+      font-weight: bold;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 15px 20px;
+      border-radius: 8px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      z-index: 1001;
+      text-align: center;
+    }
 
-        function shoot() {
-          const bullet = document.createElement("a-sphere");
-          bullet.setAttribute("radius", "0.05");
-          bullet.setAttribute("color", "yellow");
+    #ammo-display .ammo-count {
+      font-size: 32px;
+      color: #4CAF50;
+    }
 
-          // Posição inicial = posição do controle
-          const gunPos = new THREE.Vector3();
-          gun.object3D.getWorldPosition(gunPos);
-          bullet.setAttribute("position", gunPos);
+    #ammo-display .ammo-count.low {
+      color: #FF9800;
+    }
 
-          // Direção da mira
-          const direction = new THREE.Vector3();
-          gun.object3D.getWorldDirection(direction);
+    #ammo-display .ammo-count.empty {
+      color: #F44336;
+      animation: blink 0.5s infinite;
+    }
 
-          // Velocidade
-          const speed = 0.2;
+    #ammo-display .reloading {
+      color: #FFC107;
+      font-size: 16px;
+      margin-top: 5px;
+    }
 
-          // Movimento da bala
-          bullet.tick = function () {
-            gun.sceneEl.object3D.updateMatrixWorld();
-            const pos = this.object3D.position;
-            pos.add(direction.clone().multiplyScalar(speed));
+    @keyframes blink {
 
-            // Remove se for longe demais
-            if (pos.length() > 50) this.remove();
-          };
+      0%,
+      100% {
+        opacity: 1;
+      }
 
-          scene.appendChild(bullet);
+      50% {
+        opacity: 0.3;
+      }
+    }
+  </style>
+</head>
 
-          // Checar colisão com inimigo
-          const enemy = document.querySelector("#enemy");
-          const interval = setInterval(() => {
-            if (!enemy) return;
+<body>
+  <a-scene id="scene" look-controls="enabled: true" mouse-cursor="rayOrigin: mouse" raycaster="objects: .shootable">
 
-            const bPos = bullet.object3D.position;
-            const ePos = enemy.object3D.position;
+    <!-- Céu -->
+    <a-sky color="#222"></a-sky>
 
-            if (bPos.distanceTo(ePos) < 0.6) {
-              enemy.setAttribute("color", "green");
-              enemy.setAttribute("position", `${(Math.random()*6)-3} 1 ${(Math.random()*-6)-3}`);
-              bullet.remove();
-              clearInterval(interval);
-            }
-          }, 30);
+    <!-- Chão -->
+    <a-plane color="#444" width="20" height="20" rotation="-90 0 0"></a-plane>
+
+    <!-- Câmera -->
+    <a-entity id="rig" position="0 1.6 0">
+      <a-camera id="camera" look-controls="enabled: true" wasd-controls="enabled: true"></a-camera>
+    </a-entity>
+
+    <!-- Controlador VR -->
+    <a-entity id="rightHand" laser-controls="hand: right" raycaster="objects: .shootable"></a-entity>
+
+    <!-- Alvos para testar -->
+    <a-box class="shootable target" id="target-1" position="0 1 -5" color="red"
+      moving-target="speedY: 0.4; rangeY: 0.6"></a-box>
+    <a-box class="shootable target" id="target-2" position="-3 1 -5" color="blue"
+      moving-target="speedY: 0.5; rangeY: 0.6"></a-box>
+    <a-box class="shootable target" id="target-3" position="3 1 -5" color="green"
+      moving-target="speedY: 0.45; rangeY: 0.6"></a-box>
+  </a-scene>
+
+  <!-- Mira para modo desktop -->
+  <div id="crosshair"></div>
+
+  <!-- Instruções -->
+  <div id="instructions">
+    <div>Desktop: Clique para atirar | Mouse para olhar | WASD para mover | R para recarregar</div>
+    <div>VR: Trigger para atirar | Botão X/A para recarregar</div>
+  </div>
+
+  <!-- Display de Munição -->
+  <div id="ammo-display">
+    <div class="ammo-count" id="ammo-count">15</div>
+    <div>/ 15</div>
+    <div class="reloading" id="reloading-text" style="display: none;">RECARREGANDO...</div>
+  </div>
+
+  <script>
+    const scene = document.querySelector("a-scene");
+    const camera = document.querySelector("#camera");
+    const crosshair = document.getElementById("crosshair");
+    const rightHand = document.querySelector("#rightHand");
+
+    // Sistema de Munição
+    const ammoDisplay = document.getElementById("ammo-count");
+    const reloadingText = document.getElementById("reloading-text");
+    const ammoDisplayContainer = document.getElementById("ammo-display");
+
+    let currentAmmo = 15;
+    const maxAmmo = 15;
+    let isReloading = false;
+    const reloadTime = 2000; // 2 segundos para recarregar
+
+    // Verifica se está em modo VR
+    let isVRMode = false;
+
+    scene.addEventListener("enter-vr", () => {
+      isVRMode = true;
+      crosshair.style.display = "none";
+    });
+
+    scene.addEventListener("exit-vr", () => {
+      isVRMode = false;
+      crosshair.style.display = "block";
+    });
+
+    // Mostra a mira quando não está em VR
+    if (!scene.is("vr-mode")) {
+      crosshair.style.display = "block";
+    }
+
+    // Componente para movimento dos alvos
+    AFRAME.registerComponent('moving-target', {
+      schema: {
+        speedY: { type: 'number', default: 0.5 },
+        rangeY: { type: 'number', default: 0.6 }
+      },
+
+      init: function () {
+        const pos = this.el.getAttribute('position');
+        this.startY = pos.y;
+        this.offsetY = 0;
+        this.goingUp = true;
+      },
+
+      tick: function (time, timeDelta) {
+        if (this.el.hasAttribute('exploded')) return;
+
+        const deltaSeconds = timeDelta / 1000;
+
+        // Movimento vertical: sobe e desce, mas nunca abaixo da posição original
+        if (this.goingUp) {
+          this.offsetY += this.data.speedY * deltaSeconds;
+          if (this.offsetY >= this.data.rangeY) {
+            this.offsetY = this.data.rangeY;
+            this.goingUp = false; // Agora vai descer
+          }
+        } else {
+          this.offsetY -= this.data.speedY * deltaSeconds;
+          if (this.offsetY <= 0) {
+            this.offsetY = 0; // Para na posição original (chão)
+            this.goingUp = true; // Agora vai subir novamente
+          }
         }
-      </script>
 
-    </a-scene>
-  </body>
+        // Garante que nunca desce abaixo da posição original
+        if (this.offsetY < 0) {
+          this.offsetY = 0;
+          this.goingUp = true;
+        }
+
+        const pos = this.el.object3D.position;
+        pos.y = this.startY + this.offsetY;
+      }
+    });
+
+    // Componente A-Frame para física do projétil
+    AFRAME.registerComponent('projectile', {
+      schema: {
+        velocity: { type: 'vec3', default: { x: 0, y: 0, z: -1 } },
+        speed: { type: 'number', default: 20 }
+      },
+
+      init: function () {
+        // Normaliza a direção e multiplica pela velocidade
+        const dir = new THREE.Vector3(
+          this.data.velocity.x,
+          this.data.velocity.y,
+          this.data.velocity.z
+        ).normalize();
+
+        this.velocity = new THREE.Vector3(
+          dir.x * this.data.speed,
+          dir.y * this.data.speed,
+          dir.z * this.data.speed
+        );
+
+        // Armazena referência ao projétil para detecção de colisão
+        this.bullet = this.el;
+      },
+
+      tick: function (time, timeDelta) {
+        const pos = this.el.object3D.position;
+        const deltaSeconds = timeDelta / 1000;
+
+        // Atualiza posição baseada na velocidade (em unidades por segundo)
+        pos.x += this.velocity.x * deltaSeconds;
+        pos.y += this.velocity.y * deltaSeconds;
+        pos.z += this.velocity.z * deltaSeconds;
+
+        // Verifica colisão com alvos
+        this.checkCollision();
+      },
+
+      checkCollision: function () {
+        // Se o projétil já foi destruído, não verifica mais
+        if (this.el.hasAttribute('destroyed')) return;
+
+        const bulletPos = this.el.object3D.position;
+        const bulletRadius = 0.1; // Aumentado para melhor detecção
+
+        // Verifica colisão com todos os alvos
+        const targets = document.querySelectorAll('.target');
+
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+
+          if (target.hasAttribute('exploded') || !target.getAttribute('visible')) continue;
+
+          const targetPos = target.object3D.position;
+          // Caixa padrão do A-Frame é 1x1x1, então o raio de colisão é 0.5
+          const targetRadius = 0.5;
+
+          // Calcula distância entre projétil e centro do alvo
+          const dx = bulletPos.x - targetPos.x;
+          const dy = bulletPos.y - targetPos.y;
+          const dz = bulletPos.z - targetPos.z;
+          const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+          // Se colidiu (distância menor que soma dos raios)
+          if (distance < bulletRadius + targetRadius) {
+            console.log('Colisão detectada com alvo:', target.id);
+            // Marca o projétil como destruído
+            this.el.setAttribute('destroyed', true);
+
+            // Explode o alvo
+            this.explodeTarget(target);
+
+            // Remove o projétil imediatamente
+            if (this.el.parentNode) {
+              this.el.remove();
+            }
+
+            // Para todas as verificações
+            return;
+          }
+        }
+      },
+
+      explodeTarget: function (target) {
+        if (target.hasAttribute('exploded')) return;
+
+        target.setAttribute('exploded', true);
+
+        const targetPos = target.getAttribute('position');
+
+        // Cria múltiplas partículas de explosão
+        const colors = ['#FF6B00', '#FF8C00', '#FF4500', '#FFD700'];
+        const particles = [];
+
+        for (let i = 0; i < 8; i++) {
+          const particle = document.createElement('a-sphere');
+          particle.setAttribute('radius', '0.1');
+          particle.setAttribute('color', colors[Math.floor(Math.random() * colors.length)]);
+          particle.setAttribute('position', targetPos);
+          particle.setAttribute('opacity', '1');
+          scene.appendChild(particle);
+          particles.push(particle);
+
+          // Direção aleatória para cada partícula
+          const angle = (Math.PI * 2 * i) / 8;
+          const speed = 2 + Math.random() * 2;
+          const vx = Math.cos(angle) * speed;
+          const vz = Math.sin(angle) * speed;
+          const vy = (Math.random() - 0.5) * 2;
+
+          // Anima partícula voando
+          let elapsed = 0;
+          const duration = 500;
+          const startTime = Date.now();
+
+          const animateParticle = () => {
+            elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            const pos = particle.object3D.position;
+            pos.x = targetPos.x + vx * progress;
+            pos.y = targetPos.y + vy * progress - 4.9 * progress * progress; // gravidade
+            pos.z = targetPos.z + vz * progress;
+
+            particle.setAttribute('opacity', 1 - progress);
+            particle.setAttribute('scale', `${1 - progress * 0.5} ${1 - progress * 0.5} ${1 - progress * 0.5}`);
+
+            if (progress < 1) {
+              requestAnimationFrame(animateParticle);
+            } else {
+              particle.remove();
+            }
+          };
+          animateParticle();
+        }
+
+        // Cria explosão central maior
+        const explosion = document.createElement('a-sphere');
+        explosion.setAttribute('radius', '0.2');
+        explosion.setAttribute('color', '#FF4500');
+        explosion.setAttribute('position', targetPos);
+        explosion.setAttribute('opacity', '1');
+        scene.appendChild(explosion);
+
+        // Anima a explosão central
+        const startScale = 0.2;
+        const endScale = 2;
+        const duration = 400;
+        const startTime = Date.now();
+
+        const animate = () => {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+          const scale = startScale + (endScale - startScale) * progress;
+          explosion.setAttribute('scale', `${scale} ${scale} ${scale}`);
+          explosion.setAttribute('opacity', 1 - progress);
+
+          if (progress < 1) {
+            requestAnimationFrame(animate);
+          } else {
+            explosion.remove();
+          }
+        };
+        animate();
+
+        // Remove o alvo
+        target.setAttribute('visible', false);
+
+        // Respawn após alguns segundos
+        setTimeout(() => {
+          respawnTarget(target);
+        }, 3000);
+      }
+    });
+
+    // Função para fazer o alvo renascer
+    function respawnTarget(target) {
+      target.removeAttribute('exploded');
+      target.setAttribute('visible', true);
+
+      // Posição aleatória
+      const x = (Math.random() - 0.5) * 6;
+      const z = -5 - Math.random() * 3;
+      const y = 1;
+      target.setAttribute('position', `${x} ${y} ${z}`);
+
+      // Reset do componente de movimento
+      const movingComponent = target.components['moving-target'];
+      if (movingComponent) {
+        movingComponent.startY = y;
+        movingComponent.offsetY = 0;
+        movingComponent.goingUp = true;
+      }
+    }
+
+    // Função para atualizar display de munição
+    function updateAmmoDisplay() {
+      ammoDisplay.textContent = currentAmmo;
+
+      // Remove classes anteriores
+      ammoDisplay.classList.remove("low", "empty");
+
+      // Adiciona classe baseada na munição
+      if (currentAmmo === 0) {
+        ammoDisplay.classList.add("empty");
+      } else if (currentAmmo <= 5) {
+        ammoDisplay.classList.add("low");
+      }
+    }
+
+    // Função para recarregar
+    function reload() {
+      if (isReloading || currentAmmo === maxAmmo) {
+        return;
+      }
+
+      isReloading = true;
+      reloadingText.style.display = "block";
+
+      setTimeout(() => {
+        currentAmmo = maxAmmo;
+        isReloading = false;
+        reloadingText.style.display = "none";
+        updateAmmoDisplay();
+      }, reloadTime);
+    }
+
+    // Função para criar e lançar o projétil
+    function shootProjectile(origin, direction) {
+      // Verifica se tem munição e não está recarregando
+      if (currentAmmo <= 0 || isReloading) {
+        return;
+      }
+
+      // Consome munição
+      currentAmmo--;
+      updateAmmoDisplay();
+
+      const bullet = document.createElement("a-sphere");
+      bullet.setAttribute("radius", "0.05");
+      bullet.setAttribute("color", "yellow");
+      bullet.setAttribute("position", origin);
+
+      // Adiciona componente de física do projétil
+      bullet.setAttribute("projectile", {
+        velocity: {
+          x: direction.x,
+          y: direction.y,
+          z: direction.z
+        },
+        speed: 20 // velocidade do projétil
+      });
+
+      scene.appendChild(bullet);
+
+      // remove após 5 segundos se não colidir com nada
+      setTimeout(() => {
+        if (bullet.parentNode && !bullet.hasAttribute('destroyed')) {
+          bullet.remove();
+        }
+      }, 3000);
+    }
+
+    // Inicializa display de munição
+    updateAmmoDisplay();
+
+    // Tecla R para recarregar
+    document.addEventListener("keydown", (e) => {
+      if (e.key.toLowerCase() === "r" && !isVRMode) {
+        reload();
+      }
+    });
+
+    // -------------------------
+    //  PC: clique do mouse
+    // -------------------------
+    document.addEventListener("click", (e) => {
+      // Só dispara se não estiver em VR
+      if (!isVRMode) {
+        const cam = camera.object3D;
+        // Obtém a direção para onde a câmera está olhando
+        const dir = new THREE.Vector3(0, 0, -1);
+        dir.applyQuaternion(cam.quaternion);
+        dir.normalize();
+
+        const pos = cam.getWorldPosition(new THREE.Vector3());
+
+        shootProjectile(pos, dir);
+      }
+    });
+
+    // -------------------------
+    //  VR: trigger do controle
+    // -------------------------
+    rightHand.addEventListener("triggerdown", () => {
+      if (isVRMode) {
+        const controller = rightHand.object3D;
+        // Obtém a direção para onde o controlador está apontando
+        const dir = new THREE.Vector3(0, 0, -1);
+        dir.applyQuaternion(controller.quaternion);
+        dir.normalize();
+
+        const pos = controller.getWorldPosition(new THREE.Vector3());
+
+        shootProjectile(pos, dir);
+      }
+    });
+
+    // -------------------------
+    //  VR: botão para recarregar (botão X ou A)
+    // -------------------------
+    rightHand.addEventListener("xbuttondown", () => {
+      if (isVRMode) {
+        reload();
+      }
+    });
+
+    rightHand.addEventListener("abuttondown", () => {
+      if (isVRMode) {
+        reload();
+      }
+    });
+  </script>
+</body>
+
 </html>
