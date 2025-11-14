@@ -1,0 +1,82 @@
+<html>
+  <head>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  </head>
+
+  <body>
+    <a-scene vr-mode-ui="enabled: true">
+      
+      <!-- Camera (player) -->
+      <a-entity id="player" position="0 1.6 0" camera look-controls></a-entity>
+
+      <!-- Right hand (controller) -->
+      <a-entity id="gun" laser-controls="hand: right"></a-entity>
+
+      <!-- Ground -->
+      <a-plane rotation="-90 0 0" width="15" height="15" color="#444"></a-plane>
+
+      <!-- Enemy -->
+      <a-box id="enemy"
+             position="0 1 -5"
+             depth="1" height="1" width="1"
+             color="red"></a-box>
+
+      <script>
+        // Atira quando apertar o gatilho
+        const gun = document.querySelector("#gun");
+        const scene = document.querySelector("a-scene");
+
+        gun.addEventListener("triggerdown", () => {
+          shoot();
+        });
+
+        function shoot() {
+          const bullet = document.createElement("a-sphere");
+          bullet.setAttribute("radius", "0.05");
+          bullet.setAttribute("color", "yellow");
+
+          // Posição inicial = posição do controle
+          const gunPos = new THREE.Vector3();
+          gun.object3D.getWorldPosition(gunPos);
+          bullet.setAttribute("position", gunPos);
+
+          // Direção da mira
+          const direction = new THREE.Vector3();
+          gun.object3D.getWorldDirection(direction);
+
+          // Velocidade
+          const speed = 0.2;
+
+          // Movimento da bala
+          bullet.tick = function () {
+            gun.sceneEl.object3D.updateMatrixWorld();
+            const pos = this.object3D.position;
+            pos.add(direction.clone().multiplyScalar(speed));
+
+            // Remove se for longe demais
+            if (pos.length() > 50) this.remove();
+          };
+
+          scene.appendChild(bullet);
+
+          // Checar colisão com inimigo
+          const enemy = document.querySelector("#enemy");
+          const interval = setInterval(() => {
+            if (!enemy) return;
+
+            const bPos = bullet.object3D.position;
+            const ePos = enemy.object3D.position;
+
+            if (bPos.distanceTo(ePos) < 0.6) {
+              enemy.setAttribute("color", "green");
+              enemy.setAttribute("position", `${(Math.random()*6)-3} 1 ${(Math.random()*-6)-3}`);
+              bullet.remove();
+              clearInterval(interval);
+            }
+          }, 30);
+        }
+      </script>
+
+    </a-scene>
+  </body>
+</html>
